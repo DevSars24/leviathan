@@ -19,45 +19,181 @@ a deliberate, structured exercise in systems engineering: distributed consensus,
 container isolation, resource scheduling, and self-healing networking, all wired
 together from scratch. No shortcuts. No magic frameworks doing the hard parts.
 
----
+```mermaid
+flowchart TB
 
-## Architecture
+    USER["Operator / Developer"]
 
-```
-  Operator
-     │
-     ▼
-┌──────────┐
-│   CLI    │  leviathan-cli   — clap-powered command surface
-└────┬─────┘
-     │ gRPC / TCP
-     ▼
-┌─────────────────┐
-│  Control Plane  │  leviathan-control  — cluster state, API, reconciler
-└────┬────────────┘
-     │
-     ▼
-┌─────────────┐
-│  Scheduler  │  leviathan-scheduler  — placement decisions
-└────┬────────┘
-     │ heartbeat + work assignments
-     ├──────────────┬──────────────┐
-     ▼              ▼              ▼
-┌──────────┐  ┌──────────┐  ┌──────────┐
-│  Node 0  │  │  Node 1  │  │  Node N  │  leviathan-node  — worker daemon
-│  ┌────┐  │  │  ┌────┐  │  │  ┌────┐  │
-│  │ C1 │  │  │  │ C2 │  │  │  │ C3 │  │  Containers (Linux ns + cgroups)
-│  └────┘  │  │  └────┘  │  │  └────┘  │
-└──────────┘  └──────────┘  └──────────┘
-     │              │              │
-     └──────────────┴──────────────┘
-                    │
-                    ▼
-          ┌──────────────────┐
-          │   Raft Cluster   │  Distributed consensus across all nodes
-          │  (log replicated │
-          │   state machine) │
-          └──────────────────┘
+    CLI["leviathan-cli
+    Clap Command Interface"]
+
+    CONTROL["leviathan-control
+    Control Plane
+    Cluster State
+    Reconciler
+    API Layer"]
+
+    SCHEDULER["leviathan-scheduler
+    Placement Engine
+    Bin Packing
+    Resource Allocation"]
+
+    RAFT["Raft Consensus Cluster
+    Leader Election
+    Log Replication
+    Distributed State Machine"]
+
+    WAL["Storage Engine
+    Write Ahead Log
+    mmap Persistence"]
+
+    METRICS["Prometheus Metrics
+    Observability
+    Monitoring"]
+
+    DISCOVERY["Service Discovery
+    Internal Networking
+    Cluster Registry"]
+
+    USER --> CLI
+
+    CLI -->|"gRPC / TCP"| CONTROL
+
+    CONTROL --> SCHEDULER
+    CONTROL --> RAFT
+    CONTROL --> WAL
+    CONTROL --> DISCOVERY
+    CONTROL --> METRICS
+
+    subgraph Worker_Nodes
+
+        NODE0["Node 0
+        Worker Daemon"]
+
+        NODE1["Node 1
+        Worker Daemon"]
+
+        NODEN["Node N
+        Worker Daemon"]
+
+        CONTAINER1["Container C1
+        Linux Namespaces
+        cgroups v2"]
+
+        CONTAINER2["Container C2
+        Linux Namespaces
+        cgroups v2"]
+
+        CONTAINER3["Container C3
+        Linux Namespaces
+        cgroups v2"]
+
+        NODE0 --> CONTAINER1
+        NODE1 --> CONTAINER2
+        NODEN --> CONTAINER3
+
+    end
+
+    SCHEDULER --> NODE0
+    SCHEDULER --> NODE1
+    SCHEDULER --> NODEN
+
+    NODE0 --> RAFT
+    NODE1 --> RAFT
+    NODEN --> RAFT
+
+    NODE0 --> DISCOVERY
+    NODE1 --> DISCOVERY
+    NODEN --> DISCOVERY
+
+    NODE0 --> METRICS
+    NODE1 --> METRICS
+    NODEN --> METRICS
+
+    NODE0 --> WAL
+    NODE1 --> WAL
+    NODEN --> WAL
+
+    subgraph Rust_Foundations
+
+        STRUCTS["Structs"]
+        ENUMS["Enums"]
+        TRAITS["Traits"]
+        ERRORS["Error Handling"]
+        MODULES["Modules"]
+        SERDE["Serde"]
+
+    end
+
+    subgraph Async_Runtime
+
+        TOKIO["Tokio Runtime"]
+        FUTURES["Future Trait"]
+        AWAIT["async/await"]
+        MPSC["mpsc Channels"]
+        SELECT["select!"]
+        SPAWN["tokio::spawn"]
+
+    end
+
+    subgraph Networking
+
+        TCP["TcpListener/TcpStream"]
+        BINCODE["bincode"]
+        GRPC["tonic gRPC"]
+        PROTO["protobuf"]
+        FRAMING["TCP Framing"]
+
+    end
+
+    subgraph Storage
+
+        FILEIO["File IO"]
+        MMAP["memmap2"]
+        DROP["Drop Trait"]
+        OWNERSHIP["Ownership"]
+        LIFETIMES["Lifetimes"]
+        UNSAFE1["Unsafe Rust"]
+
+    end
+
+    subgraph Consensus
+
+        FOLLOWER["Follower"]
+        CANDIDATE["Candidate"]
+        LEADER["Leader"]
+        APPEND["AppendEntries"]
+        ELECTION["Election Timeout"]
+
+    end
+
+    subgraph Container_Runtime
+
+        CLONE["clone()"]
+        UNSHARE["unshare()"]
+        PIVOT["pivot_root()"]
+        CGROUPS["cgroups v2"]
+        NAMESPACE["Linux Namespaces"]
+        FFI["libc FFI"]
+
+    end
+
+    subgraph Scheduler_System
+
+        BINPACK["Bin Packing"]
+        BESTFIT["Best Fit"]
+        PLACEMENT["Placement Logic"]
+        LOADBALANCE["Load Balancing"]
+
+    end
+
+    CONTROL --> Rust_Foundations
+    CONTROL --> Async_Runtime
+    CONTROL --> Networking
+    CONTROL --> Storage
+    CONTROL --> Consensus
+    CONTROL --> Container_Runtime
+    CONTROL --> Scheduler_System
 ```
 
 ---
