@@ -1,0 +1,21 @@
+[package]
+name = "leviathan-control"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Control plane for the Leviathan platform"
+
+[[bin]]
+name = "leviathan-control"
+path = "src/main.rs"
+
+[dependencies]
+leviathan-core = { path = "../leviathan-core" }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }

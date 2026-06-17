@@ -1,0 +1,44 @@
+[workspace]
+resolver = "2"
+members = [
+    "leviathan-cli",
+    "leviathan-core",
+    "leviathan-node",
+    "leviathan-control",
+    "leviathan-scheduler",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Leviathan Contributors"]
+license = "MIT"
+
+[workspace.dependencies]
+# Core async runtime
+tokio = { version = "1", features = ["full"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1"
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Async traits
+async-trait = "0.1"
+
+# UUID
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
