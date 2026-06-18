@@ -25,8 +25,8 @@ pub enum NodeCommand {
 pub fn handle(cmd: NodeCommand) -> anyhow::Result<()> {
     match cmd {
         NodeCommand::Start { id, addr } => {
-            println!("[NOT IMPLEMENTED YET] node start  id={id}  addr={addr}");
-            println!("  → Day 2: will spawn Tokio runtime and register with control plane.");
+            println!("Starting node CLI agent wrapper... To run the official high-performance background daemon, please execute:");
+            println!("  cargo run -p leviathan-node -- --id {} --addr {}", id, addr);
         }
         NodeCommand::List => {
             println!("[NOT IMPLEMENTED YET] node list");

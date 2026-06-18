@@ -9,12 +9,13 @@ use crate::error::LeviathanError;
 ///
 /// Implementors include the control plane, scheduler, and node agent.
 /// The reconcile loop is the heart of Leviathan's self-healing behaviour.
+#[async_trait::async_trait]
 pub trait Reconcile {
     /// Run one reconciliation pass.
     ///
     /// Returns `Ok(())` if the system is converged or if recovery was
     /// attempted. Returns `Err` only on unrecoverable internal failures.
-    fn reconcile(&mut self) -> Result<(), LeviathanError>;
+    async fn reconcile(&mut self) -> Result<(), LeviathanError>;
 }
 
 /// A persistent store for cluster state.

@@ -375,6 +375,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "chrono",
  "leviathan-core",
  "serde",
  "serde_json",
@@ -387,10 +388,12 @@ dependencies = [
 name = "leviathan-core"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
  "uuid",
 ]
 
@@ -399,6 +402,8 @@ name = "leviathan-node"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
+ "clap",
  "leviathan-core",
  "serde",
  "serde_json",
