@@ -7,6 +7,7 @@
 //! dependency-light: only serde, thiserror, uuid, and chrono.
 
 pub mod container;
+pub mod cooperative;
 pub mod error;
 pub mod node;
 pub mod resources;
@@ -14,8 +15,9 @@ pub mod traits;
 
 // Re-export everything at the crate root for convenience.
 pub use container::{Container, ContainerId, ContainerStatus};
+pub use cooperative::{CooperativeYield, ExponentialBackoff};
 pub use error::LeviathanError;
-pub use node::{Node, NodeId, NodeStatus};
+pub use node::{Node, NodeId, NodeStatus, Heartbeat, NodeMessage};
 pub use resources::ResourceSpec;
 pub use traits::{Reconcile, StateStore};
 

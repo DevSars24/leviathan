@@ -77,3 +77,68 @@ impl Node {
         }
     }
 }
+
+/// A heartbeat message sent from worker nodes to the control plane.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Heartbeat {
+    /// Unique identifier of the reporting node.
+    pub node_id: NodeId,
+    /// Lifecycle state reported by the node.
+    pub status: NodeStatus,
+    /// The node's current available resource capacity.
+    pub resources: ResourceSpec,
+    /// Timestamp when this heartbeat was generated.
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+/// Messages exchanged between worker nodes and the control plane over TCP.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum NodeMessage {
+    /// Initial registration request sent by a worker node.
+    Register {
+        /// Unique identifier for the node.
+        id: String,
+        /// Listen address of the node.
+        addr: String,
+        /// Resources advertised by the node.
+        resources: ResourceSpec,
+    },
+    /// Periodic heartbeat report.
+    Heartbeat(Heartbeat),
+    /// Clean deregistration on node shutdown.
+    Deregister {
+        /// Unique identifier of the node.
+        id: String,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::resources::ResourceSpec;
+
+    #[test]
+    fn test_node_message_serialization() {
+        let original_msg = NodeMessage::Register {
+            id: "node-test".to_string(),
+            addr: "127.0.0.1:9999".to_string(),
+            resources: ResourceSpec::new(1000, 2048),
+        };
+
+        // Serialize to JSON string
+        let serialized = serde_json::to_string(&original_msg).expect("Failed to serialize NodeMessage");
+        
+        // Deserialize back
+        let deserialized_msg: NodeMessage = serde_json::from_str(&serialized).expect("Failed to deserialize NodeMessage");
+
+        match deserialized_msg {
+            NodeMessage::Register { id, addr, resources } => {
+                assert_eq!(id, "node-test");
+                assert_eq!(addr, "127.0.0.1:9999");
+                assert_eq!(resources.cpu_millicores, 1000);
+                assert_eq!(resources.memory_mib, 2048);
+            }
+            _ => panic!("Expected NodeMessage::Register variant"),
+        }
+    }
+}
