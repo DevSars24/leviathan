@@ -22,7 +22,25 @@ pub enum LeviathanError {
 
     /// The scheduler could not find a node with sufficient resources.
     #[error("no schedulable node available: {reason}")]
-    NoSchedulableNode { reason: String },
+    NoSchedulableNode {
+        /// Human-readable explanation of why no node was schedulable.
+        reason: String,
+    },
+
+    /// A node exists but its remaining capacity cannot satisfy the request.
+    #[error("resource exhausted on node {node_id}: requested {requested}, available {available}")]
+    ResourceExhausted {
+        /// The node that was considered.
+        node_id: String,
+        /// Human-readable description of the resources requested.
+        requested: String,
+        /// Human-readable description of the resources available.
+        available: String,
+    },
+
+    /// An operation exceeded its deadline.
+    #[error("timeout: {0}")]
+    Timeout(String),
 
     /// An I/O error from the storage engine or network layer.
     #[error("I/O error: {0}")]

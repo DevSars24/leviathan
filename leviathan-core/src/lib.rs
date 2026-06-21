@@ -6,6 +6,8 @@
 //! Every crate in the workspace depends on this crate. It is intentionally
 //! dependency-light: only serde, thiserror, uuid, and chrono.
 
+#![warn(missing_docs)]
+
 pub mod container;
 pub mod cooperative;
 pub mod error;
@@ -17,9 +19,9 @@ pub mod traits;
 pub use container::{Container, ContainerId, ContainerStatus};
 pub use cooperative::{CooperativeYield, ExponentialBackoff};
 pub use error::LeviathanError;
-pub use node::{Node, NodeId, NodeStatus, Heartbeat, NodeMessage};
+pub use node::{Heartbeat, Node, NodeId, NodeMessage, NodeStatus};
 pub use resources::ResourceSpec;
-pub use traits::{Reconcile, StateStore};
+pub use traits::{HealthStatus, Healthcheck, Reconcile, StateStore};
 
 /// Crate-level `Result` alias backed by [`LeviathanError`].
 pub type Result<T> = std::result::Result<T, LeviathanError>;

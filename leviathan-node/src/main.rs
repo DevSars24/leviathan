@@ -4,8 +4,10 @@
 //! It connects to the control plane, reports node health via heartbeat,
 //! and runs simulated workloads.
 
-use clap::Parser;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+
+use clap::Parser;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -32,7 +34,11 @@ struct Args {
     control_addr: String,
 }
 
-/// Helper function to serialize and send a NodeMessage over TCP.
+/// Counter tracking total messages sent to the control plane for observability.
+static MESSAGES_SENT: AtomicU64 = AtomicU64::new(0);
+
+/// Serialize and send a [`NodeMessage`] over TCP using newline-delimited JSON.
+#[tracing::instrument(skip(stream, msg), fields(msg_type = ?std::mem::discriminant(msg)))]
 async fn send_msg(stream: &mut TcpStream, msg: &NodeMessage) -> std::io::Result<()> {
     let mut serialized = serde_json::to_string(msg).map_err(|e| {
         std::io::Error::new(std::io::ErrorKind::InvalidData, e)
@@ -40,10 +46,13 @@ async fn send_msg(stream: &mut TcpStream, msg: &NodeMessage) -> std::io::Result<
     serialized.push('\n');
     stream.write_all(serialized.as_bytes()).await?;
     stream.flush().await?;
+    MESSAGES_SENT.fetch_add(1, Ordering::Relaxed);
     Ok(())
 }
 
-/// A simulated heavy CPU calculation that yields cooperatively to prevent starvation.
+/// A simulated heavy CPU calculation that yields cooperatively to prevent
+/// starvation of other tasks on the Tokio executor.
+#[tracing::instrument(skip_all, fields(input))]
 async fn perform_cooperative_calculation(input: usize) -> u64 {
     let mut sum: u64 = 0;
     // Perform computation in stages, yielding to the Tokio executor at each stage
@@ -58,6 +67,7 @@ async fn perform_cooperative_calculation(input: usize) -> u64 {
 }
 
 /// Spawns a mock workload manager to calculate system telemetry.
+#[tracing::instrument(skip_all, fields(node_id = %node_id))]
 async fn run_mock_workloads(node_id: NodeId, resources: ResourceSpec, tx: mpsc::Sender<NodeMessage>) {
     info!("Starting mock workload manager...");
     let mut iteration = 0;
@@ -66,16 +76,16 @@ async fn run_mock_workloads(node_id: NodeId, resources: ResourceSpec, tx: mpsc::
         iteration += 1;
 
         info!(
-            "Workload Manager [iter {}]: Simulating heavy CPU telemetry computation...",
-            iteration
+            iteration,
+            "Simulating heavy CPU telemetry computation..."
         );
 
         let result = perform_cooperative_calculation(iteration).await;
 
         info!(
-            "Workload Manager [iter {}]: Telemetry computation complete: {}. Reporting status...",
             iteration,
-            result
+            result,
+            "Telemetry computation complete. Reporting status."
         );
 
         let hb = Heartbeat {
@@ -104,7 +114,12 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    info!("Initializing Leviathan Worker Node Daemon [ID: {}]...", args.id);
+    info!(
+        node_id = %args.id,
+        addr = %args.addr,
+        control_addr = %args.control_addr,
+        "Initializing Leviathan Worker Node Daemon"
+    );
 
     // Setup exponential backoff for connection retries
     let mut backoff = ExponentialBackoff::new(
@@ -120,7 +135,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::pin!(shutdown_signal);
 
     loop {
-        info!("Attempting to connect to Control Plane at {}...", args.control_addr);
+        info!(control_addr = %args.control_addr, "Attempting to connect to Control Plane");
 
         let connect_fut = TcpStream::connect(&args.control_addr);
         let stream_result = tokio::select! {
@@ -136,18 +151,19 @@ async fn main() -> anyhow::Result<()> {
                 info!("Connected successfully. Registering node...");
                 backoff.reset(Duration::from_millis(500));
 
+                // --- NodeMessage now uses NodeId, not raw String ---
                 let register_msg = NodeMessage::Register {
-                    id: args.id.clone(),
+                    id: node_id.clone(),
                     addr: args.addr.clone(),
                     resources: resources.clone(),
                 };
 
                 if let Err(e) = send_msg(&mut stream, &register_msg).await {
-                    error!("Failed to send registration message: {}. Retrying...", e);
+                    error!(error = %e, "Failed to send registration message. Retrying...");
                     continue;
                 }
 
-                // Channel to funnel messages from concurrent tasks to the single stream writer
+                // Channel to funnel messages from concurrent tasks to the single stream writer.
                 let (tx, mut rx) = mpsc::channel::<NodeMessage>(50);
 
                 // Spawn mock container workload manager
@@ -158,8 +174,10 @@ async fn main() -> anyhow::Result<()> {
                     run_mock_workloads(runner_node_id, runner_resources, runner_tx).await;
                 });
 
-                // Spawn periodic heartbeat reporter task
-                let hb_tx = tx.clone();
+                // Spawn periodic heartbeat reporter task.
+                // NOTE: Use `tx` directly here (not `tx.clone()`) so the last
+                // sender reference is consumed — when both spawned tasks exit,
+                // the channel closes cleanly instead of lingering.
                 let hb_node_id = node_id.clone();
                 let hb_resources = resources.clone();
                 let hb_handle = tokio::spawn(async move {
@@ -173,7 +191,7 @@ async fn main() -> anyhow::Result<()> {
                             resources: hb_resources.clone(),
                             timestamp: chrono::Utc::now(),
                         };
-                        if hb_tx.send(NodeMessage::Heartbeat(hb)).await.is_err() {
+                        if tx.send(NodeMessage::Heartbeat(hb)).await.is_err() {
                             break;
                         }
                     }
@@ -186,14 +204,14 @@ async fn main() -> anyhow::Result<()> {
                         _ = &mut shutdown_signal => {
                             info!("Shutdown signal received. Deregistering node gracefully...");
                             graceful_exit = true;
-                            let deregister_msg = NodeMessage::Deregister { id: args.id.clone() };
+                            let deregister_msg = NodeMessage::Deregister { id: node_id.clone() };
                             let _ = send_msg(&mut stream, &deregister_msg).await;
                             break;
                         }
                         maybe_msg = rx.recv() => {
                             if let Some(msg) = maybe_msg {
                                 if let Err(e) = send_msg(&mut stream, &msg).await {
-                                    error!("Connection error writing to control plane: {}", e);
+                                    error!(error = %e, "Connection error writing to control plane");
                                     break;
                                 }
                             } else {
@@ -207,6 +225,11 @@ async fn main() -> anyhow::Result<()> {
                 runner_handle.abort();
                 hb_handle.abort();
 
+                info!(
+                    total_messages_sent = MESSAGES_SENT.load(Ordering::Relaxed),
+                    "Session ended"
+                );
+
                 if graceful_exit {
                     break;
                 }
@@ -214,9 +237,9 @@ async fn main() -> anyhow::Result<()> {
             Err(e) => {
                 let retry_delay = backoff.next_backoff();
                 warn!(
-                    "Connection failed: {}. Retrying in {}ms...",
-                    e,
-                    retry_delay.as_millis()
+                    error = %e,
+                    retry_ms = retry_delay.as_millis() as u64,
+                    "Connection failed. Retrying..."
                 );
                 tokio::select! {
                     _ = tokio::time::sleep(retry_delay) => {}
@@ -229,6 +252,9 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    info!("Leviathan Worker Node shut down cleanly.");
+    info!(
+        total_messages_sent = MESSAGES_SENT.load(Ordering::Relaxed),
+        "Leviathan Worker Node shut down cleanly."
+    );
     Ok(())
 }

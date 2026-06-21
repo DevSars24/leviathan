@@ -2,6 +2,8 @@
 //!
 //! A [`Node`] represents a worker machine that can accept and run containers.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use crate::resources::ResourceSpec;
@@ -24,8 +26,8 @@ impl NodeId {
     }
 }
 
-impl std::fmt::Display for NodeId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for NodeId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
@@ -41,8 +43,8 @@ pub enum NodeStatus {
     Unknown,
 }
 
-impl std::fmt::Display for NodeStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for NodeStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             NodeStatus::Ready => write!(f, "Ready"),
             NodeStatus::NotReady => write!(f, "NotReady"),
@@ -78,6 +80,16 @@ impl Node {
     }
 }
 
+impl fmt::Display for Node {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} [{}] @ {} ({})",
+            self.id, self.status, self.addr, self.resources
+        )
+    }
+}
+
 /// A heartbeat message sent from worker nodes to the control plane.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Heartbeat {
@@ -92,12 +104,15 @@ pub struct Heartbeat {
 }
 
 /// Messages exchanged between worker nodes and the control plane over TCP.
+///
+/// Uses [`NodeId`] throughout to enforce type safety — preventing accidental
+/// confusion between node IDs, container IDs, and arbitrary strings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NodeMessage {
     /// Initial registration request sent by a worker node.
     Register {
         /// Unique identifier for the node.
-        id: String,
+        id: NodeId,
         /// Listen address of the node.
         addr: String,
         /// Resources advertised by the node.
@@ -108,7 +123,7 @@ pub enum NodeMessage {
     /// Clean deregistration on node shutdown.
     Deregister {
         /// Unique identifier of the node.
-        id: String,
+        id: NodeId,
     },
 }
 
@@ -118,27 +133,79 @@ mod tests {
     use crate::resources::ResourceSpec;
 
     #[test]
-    fn test_node_message_serialization() {
+    fn node_message_register_roundtrip() {
         let original_msg = NodeMessage::Register {
-            id: "node-test".to_string(),
+            id: NodeId::new("node-test"),
             addr: "127.0.0.1:9999".to_string(),
             resources: ResourceSpec::new(1000, 2048),
         };
 
-        // Serialize to JSON string
-        let serialized = serde_json::to_string(&original_msg).expect("Failed to serialize NodeMessage");
-        
-        // Deserialize back
-        let deserialized_msg: NodeMessage = serde_json::from_str(&serialized).expect("Failed to deserialize NodeMessage");
+        let serialized =
+            serde_json::to_string(&original_msg).expect("Failed to serialize NodeMessage");
+        let deserialized: NodeMessage =
+            serde_json::from_str(&serialized).expect("Failed to deserialize NodeMessage");
 
-        match deserialized_msg {
+        match deserialized {
             NodeMessage::Register { id, addr, resources } => {
-                assert_eq!(id, "node-test");
+                assert_eq!(id, NodeId::new("node-test"));
                 assert_eq!(addr, "127.0.0.1:9999");
-                assert_eq!(resources.cpu_millicores, 1000);
-                assert_eq!(resources.memory_mib, 2048);
+                assert_eq!(resources, ResourceSpec::new(1000, 2048));
             }
             _ => panic!("Expected NodeMessage::Register variant"),
         }
+    }
+
+    #[test]
+    fn heartbeat_roundtrip() {
+        let hb = Heartbeat {
+            node_id: NodeId::new("node-1"),
+            status: NodeStatus::Ready,
+            resources: ResourceSpec::new(2000, 4096),
+            timestamp: chrono::Utc::now(),
+        };
+
+        let msg = NodeMessage::Heartbeat(hb);
+        let json = serde_json::to_string(&msg).expect("serialize");
+        let msg2: NodeMessage = serde_json::from_str(&json).expect("deserialize");
+
+        match msg2 {
+            NodeMessage::Heartbeat(hb) => {
+                assert_eq!(hb.node_id, NodeId::new("node-1"));
+                assert_eq!(hb.status, NodeStatus::Ready);
+            }
+            _ => panic!("Expected NodeMessage::Heartbeat variant"),
+        }
+    }
+
+    #[test]
+    fn deregister_roundtrip() {
+        let msg = NodeMessage::Deregister {
+            id: NodeId::new("node-99"),
+        };
+        let json = serde_json::to_string(&msg).expect("serialize");
+        let msg2: NodeMessage = serde_json::from_str(&json).expect("deserialize");
+
+        match msg2 {
+            NodeMessage::Deregister { id } => {
+                assert_eq!(id, NodeId::new("node-99"));
+            }
+            _ => panic!("Expected NodeMessage::Deregister variant"),
+        }
+    }
+
+    #[test]
+    fn node_status_display() {
+        assert_eq!(format!("{}", NodeStatus::Ready), "Ready");
+        assert_eq!(format!("{}", NodeStatus::NotReady), "NotReady");
+        assert_eq!(format!("{}", NodeStatus::Unknown), "Unknown");
+    }
+
+    #[test]
+    fn node_display() {
+        let node = Node::new("node-1", "127.0.0.1:7001", ResourceSpec::new(2000, 4096));
+        let s = format!("{}", node);
+        assert!(s.contains("node-1"));
+        assert!(s.contains("Unknown")); // default status
+        assert!(s.contains("127.0.0.1:7001"));
     }
 }
