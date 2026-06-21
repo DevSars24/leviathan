@@ -376,6 +376,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "clap",
  "leviathan-core",
  "serde",
  "serde_json",

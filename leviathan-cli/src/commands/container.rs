@@ -3,6 +3,7 @@
 //! Handles `leviathan container <action>`.
 
 use clap::Subcommand;
+use tracing::info;
 
 /// Subcommands available under `leviathan container`.
 #[derive(Subcommand, Debug)]
@@ -16,6 +17,14 @@ pub enum ContainerCommand {
         /// A human-readable name for this container instance.
         #[arg(long)]
         name: String,
+
+        /// CPU request in millicores (default: 500 = 0.5 vCPU).
+        #[arg(long, default_value_t = 500)]
+        cpu: u64,
+
+        /// Memory request in MiB (default: 256).
+        #[arg(long, default_value_t = 256)]
+        memory: u64,
     },
     /// List all containers tracked by the control plane.
     List,
@@ -24,11 +33,25 @@ pub enum ContainerCommand {
 /// Dispatch a [`ContainerCommand`] to the appropriate handler.
 pub fn handle(cmd: ContainerCommand) -> anyhow::Result<()> {
     match cmd {
-        ContainerCommand::Run { image, name } => {
+        ContainerCommand::Run {
+            image,
+            name,
+            cpu,
+            memory,
+        } => {
+            info!(
+                image = %image,
+                name = %name,
+                cpu_millicores = cpu,
+                memory_mib = memory,
+                "Submitting container workload"
+            );
             println!("[NOT IMPLEMENTED YET] container run  image={image}  name={name}");
+            println!("  Resources: {}m CPU / {}Mi", cpu, memory);
             println!("  → Day 6: will set up Linux namespaces and cgroups via unsafe Rust.");
         }
         ContainerCommand::List => {
+            info!("Listing containers");
             println!("[NOT IMPLEMENTED YET] container list");
             println!("  → Day 3: will query control plane and render container table.");
         }

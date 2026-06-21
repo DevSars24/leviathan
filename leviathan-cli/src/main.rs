@@ -11,6 +11,7 @@
 //! leviathan container run --image ubuntu:22.04 --name my-container
 //! leviathan container list
 //! leviathan cluster status
+//! leviathan cluster version
 //! ```
 
 use clap::{Parser, Subcommand};
@@ -68,7 +69,8 @@ enum Commands {
 // Entry point
 // ---------------------------------------------------------------------------
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // Initialise structured logging based on verbosity flag.
@@ -84,6 +86,8 @@ fn main() -> anyhow::Result<()> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(log_level)),
         )
         .init();
+
+    tracing::debug!(command = ?cli.command, "Dispatching CLI command");
 
     match cli.command {
         Commands::Node { action } => node::handle(action)?,
