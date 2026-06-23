@@ -76,3 +76,10 @@ impl From<serde_json::Error> for LeviathanError {
         LeviathanError::Serialization(e.to_string())
     }
 }
+
+impl From<Box<bincode::ErrorKind>> for LeviathanError {
+    fn from(e: Box<bincode::ErrorKind>) -> Self {
+        LeviathanError::Serialization(e.to_string())
+    }
+}
+

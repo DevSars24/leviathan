@@ -1,0 +1,25 @@
+[package]
+name = "leviathan-net"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Networking layer for the Leviathan platform — TCP framing, bincode codec, and gRPC services"
+
+[dependencies]
+leviathan-core = { path = "../leviathan-core" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bincode = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tonic = { workspace = true }
+prost = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }
+prost-build = { workspace = true }

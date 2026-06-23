@@ -1,0 +1,102 @@
+// Protocol Buffers service definition for Leviathan's node-to-control-plane
+// communication channel.
+//
+// This defines the gRPC API that worker nodes use to register themselves,
+// report health via heartbeats, and gracefully deregister. The control plane
+// also exposes a ListNodes RPC for the CLI and other internal consumers.
+
+syntax = "proto3";
+
+package leviathan;
+
+// ---------------------------------------------------------------------------
+// Service
+// ---------------------------------------------------------------------------
+
+/// NodeService is the primary RPC interface between worker nodes and the
+/// control plane. Every node daemon opens a gRPC channel to this service
+/// on startup and uses it for its entire lifecycle.
+service NodeService {
+  /// Register a worker node with the control plane.
+  /// Called once during node startup. Idempotent — re-registering an
+  /// already-known node updates its address and resources.
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
+
+  /// Send a periodic heartbeat to the control plane.
+  /// The control plane uses this to track node liveness and update
+  /// resource availability.
+  rpc SendHeartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+  /// Gracefully deregister a node from the cluster.
+  /// Called during clean shutdown. The control plane marks the node
+  /// as Unknown and stops expecting heartbeats.
+  rpc DeregisterNode(DeregisterNodeRequest) returns (DeregisterNodeResponse);
+
+  /// List all nodes currently registered in the cluster.
+  /// Used by the CLI (`leviathan cluster status`) and internal
+  /// reconciliation loops.
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Messages
+// ---------------------------------------------------------------------------
+
+/// Resources advertised by a node — CPU in millicores, memory in MiB.
+message ResourceInfo {
+  uint64 cpu_millicores = 1;
+  uint64 memory_mib = 2;
+}
+
+/// Snapshot of a registered node's state as seen by the control plane.
+message NodeInfo {
+  string id = 1;
+  string addr = 2;
+  string status = 3;      // "Ready" | "NotReady" | "Unknown"
+  ResourceInfo resources = 4;
+}
+
+// --- RegisterNode ---
+
+message RegisterNodeRequest {
+  string node_id = 1;
+  string addr = 2;
+  ResourceInfo resources = 3;
+}
+
+message RegisterNodeResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
+// --- SendHeartbeat ---
+
+message HeartbeatRequest {
+  string node_id = 1;
+  string status = 2;       // "Ready" | "NotReady"
+  ResourceInfo resources = 3;
+  /// RFC 3339 timestamp of when the heartbeat was generated.
+  string timestamp = 4;
+}
+
+message HeartbeatResponse {
+  bool acknowledged = 1;
+}
+
+// --- DeregisterNode ---
+
+message DeregisterNodeRequest {
+  string node_id = 1;
+}
+
+message DeregisterNodeResponse {
+  bool acknowledged = 1;
+}
+
+// --- ListNodes ---
+
+message ListNodesRequest {}
+
+message ListNodesResponse {
+  repeated NodeInfo nodes = 1;
+}
