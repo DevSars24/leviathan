@@ -36,6 +36,7 @@ use leviathan_core::{
 // ---------------------------------------------------------------------------
 
 /// Generated protobuf types and gRPC service traits from `leviathan.proto`.
+#[allow(missing_docs)]
 pub mod proto {
     tonic::include_proto!("leviathan");
 }
