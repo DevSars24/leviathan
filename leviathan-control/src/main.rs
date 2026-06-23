@@ -4,6 +4,18 @@
 //! nodes, containers, and their current status. It drives reconciliation,
 //! delegates scheduling decisions to `leviathan-scheduler`, and exposes an
 //! API for the CLI to query.
+//!
+//! # Dual-Protocol Architecture
+//!
+//! The control plane accepts connections over **two** transports:
+//!
+//! 1. **Raw TCP** (default `:8000`) — length-prefixed bincode frames.
+//!    Used by nodes that prefer lightweight, zero-dependency communication.
+//! 2. **gRPC** (default `:50051`) — protobuf over HTTP/2 via `tonic`.
+//!    Used by nodes that need cross-language interop or streaming RPCs.
+//!
+//! Both transports funnel messages into the same [`ClusterStateActor`] via
+//! an `mpsc` channel, guaranteeing a single source of truth.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -12,13 +24,18 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use clap::Parser;
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{error, info, warn};
 
 use leviathan_core::{
     Heartbeat, LeviathanError, Node, NodeId, NodeMessage, NodeStatus, Reconcile,
+};
+
+use leviathan_net::codec;
+use leviathan_net::error::NetError;
+use leviathan_net::grpc::{
+    GrpcStateCommand, NodeServiceImpl, NodeServiceServer,
 };
 
 /// CLI arguments for the control plane daemon.
@@ -32,14 +49,25 @@ struct Args {
     #[arg(long, default_value = "127.0.0.1:8000")]
     bind_addr: String,
 
+    /// Address to bind the gRPC server on.
+    #[arg(long, default_value = "127.0.0.1:50051")]
+    grpc_addr: String,
+
     /// Grace period (in seconds) before a node is marked Unknown for missing
     /// heartbeats.
     #[arg(long, default_value_t = 6)]
     grace_period_secs: u64,
 }
 
-/// Counter tracking total inbound node connections for observability.
-static CONNECTIONS_ACCEPTED: AtomicU64 = AtomicU64::new(0);
+/// Counter tracking total inbound TCP node connections for observability.
+static TCP_CONNECTIONS_ACCEPTED: AtomicU64 = AtomicU64::new(0);
+
+/// Counter tracking total inbound gRPC requests for observability.
+static GRPC_REQUESTS_HANDLED: AtomicU64 = AtomicU64::new(0);
+
+// ---------------------------------------------------------------------------
+// State commands
+// ---------------------------------------------------------------------------
 
 /// Commands that can be sent to the [`ClusterStateActor`].
 #[derive(Debug)]
@@ -70,6 +98,10 @@ pub enum StateCommand {
         grace_period: Duration,
     },
 }
+
+// ---------------------------------------------------------------------------
+// Cluster state actor
+// ---------------------------------------------------------------------------
 
 /// The centralized actor that owns and manages the cluster state.
 ///
@@ -177,6 +209,10 @@ impl ClusterStateActor {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Reconciler
+// ---------------------------------------------------------------------------
+
 /// Reconciliation worker that invokes liveness updates on the actor.
 struct LivenessReconciler {
     sender: mpsc::Sender<StateCommand>,
@@ -198,69 +234,124 @@ impl Reconcile for LivenessReconciler {
     }
 }
 
-/// Handle an individual worker node connection stream.
+// ---------------------------------------------------------------------------
+// TCP connection handler — now using length-prefixed bincode frames
+// ---------------------------------------------------------------------------
+
+/// Handle an individual worker node connection stream using length-prefixed
+/// bincode framing.
+///
+/// Replaces the previous newline-delimited JSON approach. Each message is now:
+/// - A 4-byte big-endian length header
+/// - Followed by `bincode`-serialized [`NodeMessage`] bytes
+///
+/// Handles partial reads (via `read_exact` inside the frame layer) and
+/// connection resets (mapped to `NetError::ConnectionReset`).
 #[tracing::instrument(skip(stream, tx), fields(peer = %peer_addr))]
 async fn handle_node_connection(
-    stream: TcpStream,
+    mut stream: TcpStream,
     peer_addr: SocketAddr,
     tx: mpsc::Sender<StateCommand>,
 ) {
-    info!("New node connection established");
-    let mut reader = BufReader::new(stream);
-    let mut line = String::new();
+    info!("New TCP node connection established (bincode framing)");
 
     loop {
-        line.clear();
-        match reader.read_line(&mut line).await {
-            Ok(0) => {
-                info!("Connection closed by remote node");
+        match codec::recv_message::<NodeMessage>(&mut stream).await {
+            Ok(Some(message)) => match message {
+                NodeMessage::Register { id, addr, resources } => {
+                    let mut node = Node::new(id.as_str(), addr, resources);
+                    // Fallback to TCP peer address if the node advertises
+                    // an empty or wildcard address.
+                    if node.addr.is_empty() || node.addr.contains("0.0.0.0") {
+                        node.addr = format!("{}:{}", peer_addr.ip(), peer_addr.port());
+                    }
+                    let _ = tx.send(StateCommand::RegisterNode { node }).await;
+                }
+                NodeMessage::Heartbeat(hb) => {
+                    let _ = tx
+                        .send(StateCommand::RecordHeartbeat { heartbeat: hb })
+                        .await;
+                }
+                NodeMessage::Deregister { id } => {
+                    let _ = tx.send(StateCommand::DeregisterNode { id }).await;
+                    break; // Stop connection handler on deregistration
+                }
+            },
+            Ok(None) => {
+                // Clean EOF — the remote node closed the connection.
+                info!("TCP connection closed cleanly by remote node");
                 break;
             }
-            Ok(_) => {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                match serde_json::from_str::<NodeMessage>(trimmed) {
-                    Ok(message) => match message {
-                        NodeMessage::Register { id, addr, resources } => {
-                            let mut node = Node::new(id.as_str(), addr, resources);
-                            // If registration gives "local" or empty address,
-                            // fallback to TCP peer address.
-                            if node.addr.is_empty() || node.addr.contains("0.0.0.0") {
-                                node.addr =
-                                    format!("{}:{}", peer_addr.ip(), peer_addr.port());
-                            }
-                            let _ = tx.send(StateCommand::RegisterNode { node }).await;
-                        }
-                        NodeMessage::Heartbeat(hb) => {
-                            let _ = tx
-                                .send(StateCommand::RecordHeartbeat { heartbeat: hb })
-                                .await;
-                        }
-                        NodeMessage::Deregister { id } => {
-                            let _ = tx
-                                .send(StateCommand::DeregisterNode { id })
-                                .await;
-                            break; // Stop connection handler on deregistration
-                        }
-                    },
-                    Err(e) => {
-                        error!(
-                            error = %e,
-                            raw_data = trimmed,
-                            "Failed to parse node message"
-                        );
-                    }
-                }
+            Err(NetError::ConnectionReset(reason)) => {
+                warn!(reason = %reason, "TCP connection reset by remote node");
+                break;
+            }
+            Err(NetError::IncompleteFrame { bytes_read, expected }) => {
+                warn!(
+                    bytes_read,
+                    expected,
+                    "Incomplete frame — node disconnected mid-message"
+                );
+                break;
             }
             Err(e) => {
-                error!(error = %e, "Error reading node connection");
+                error!(error = %e, "Error reading from TCP node connection");
                 break;
             }
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// gRPC bridge — forwards GrpcStateCommands into the StateCommand channel
+// ---------------------------------------------------------------------------
+
+/// Spawn a bridge task that receives [`GrpcStateCommand`]s from the gRPC
+/// service and forwards them as [`StateCommand`]s into the actor channel.
+///
+/// This decouples the gRPC module (in `leviathan-net`) from the control
+/// plane's internal command type.
+async fn grpc_bridge(
+    mut grpc_rx: mpsc::Receiver<GrpcStateCommand>,
+    state_tx: mpsc::Sender<StateCommand>,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    loop {
+        tokio::select! {
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() {
+                    info!("gRPC bridge received shutdown. Exiting.");
+                    break;
+                }
+            }
+            Some(cmd) = grpc_rx.recv() => {
+                GRPC_REQUESTS_HANDLED.fetch_add(1, Ordering::Relaxed);
+                let state_cmd = match cmd {
+                    GrpcStateCommand::RegisterNode { node } => {
+                        StateCommand::RegisterNode { node }
+                    }
+                    GrpcStateCommand::RecordHeartbeat { heartbeat } => {
+                        StateCommand::RecordHeartbeat { heartbeat }
+                    }
+                    GrpcStateCommand::DeregisterNode { id } => {
+                        StateCommand::DeregisterNode { id }
+                    }
+                    GrpcStateCommand::GetNodes { resp } => {
+                        StateCommand::GetNodes { resp }
+                    }
+                };
+                if state_tx.send(state_cmd).await.is_err() {
+                    error!("State actor channel closed. gRPC bridge exiting.");
+                    break;
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -276,12 +367,13 @@ async fn main() -> anyhow::Result<()> {
 
     info!(
         bind_addr = %args.bind_addr,
+        grpc_addr = %args.grpc_addr,
         grace_period_secs = args.grace_period_secs,
-        "Initializing Leviathan Control Plane Daemon"
+        "Initializing Leviathan Control Plane Daemon (dual-protocol: TCP + gRPC)"
     );
 
     let listener = TcpListener::bind(&args.bind_addr).await?;
-    info!(addr = %args.bind_addr, "Control plane listening for heartbeats");
+    info!(addr = %args.bind_addr, "TCP listener bound (bincode framing)");
 
     let grace_period = Duration::from_secs(args.grace_period_secs);
 
@@ -289,14 +381,14 @@ async fn main() -> anyhow::Result<()> {
     let (tx, rx) = mpsc::channel(100);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
-    // Spawn state actor task
+    // --- Spawn state actor task ---
     let actor = ClusterStateActor::new(rx);
     let actor_shutdown_rx = shutdown_rx.clone();
     let actor_handle = tokio::spawn(async move {
         actor.run(actor_shutdown_rx).await;
     });
 
-    // Spawn reconciler task
+    // --- Spawn reconciler task ---
     let reconciler_shutdown_rx = shutdown_rx.clone();
     let reconciler_tx = tx.clone();
     let reconciler_handle = tokio::spawn(async move {
@@ -325,7 +417,38 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // Spawn connection listener loop
+    // --- Spawn gRPC server ---
+    let (grpc_tx, grpc_rx) = mpsc::channel::<GrpcStateCommand>(100);
+    let grpc_bridge_tx = tx.clone();
+    let grpc_bridge_shutdown = shutdown_rx.clone();
+    let bridge_handle = tokio::spawn(async move {
+        grpc_bridge(grpc_rx, grpc_bridge_tx, grpc_bridge_shutdown).await;
+    });
+
+    let grpc_addr: SocketAddr = args.grpc_addr.parse()?;
+    let grpc_shutdown_rx = shutdown_rx.clone();
+    let grpc_handle = tokio::spawn(async move {
+        let svc = NodeServiceImpl::new(grpc_tx);
+        info!(addr = %grpc_addr, "gRPC server starting");
+
+        let mut shutdown = grpc_shutdown_rx;
+        let server = tonic::transport::Server::builder()
+            .add_service(NodeServiceServer::new(svc))
+            .serve_with_shutdown(grpc_addr, async move {
+                // Wait for shutdown signal via the watch channel.
+                loop {
+                    if shutdown.changed().await.is_err() || *shutdown.borrow() {
+                        break;
+                    }
+                }
+            });
+
+        if let Err(e) = server.await {
+            error!(error = %e, "gRPC server error");
+        }
+    });
+
+    // --- Spawn TCP connection listener loop ---
     let listener_tx = tx.clone();
     let listener_shutdown_rx = shutdown_rx.clone();
     let listener_handle = tokio::spawn(async move {
@@ -341,7 +464,7 @@ async fn main() -> anyhow::Result<()> {
                 accept_result = listener.accept() => {
                     match accept_result {
                         Ok((stream, peer_addr)) => {
-                            CONNECTIONS_ACCEPTED.fetch_add(1, Ordering::Relaxed);
+                            TCP_CONNECTIONS_ACCEPTED.fetch_add(1, Ordering::Relaxed);
                             let tx_clone = listener_tx.clone();
                             tokio::spawn(async move {
                                 handle_node_connection(stream, peer_addr, tx_clone).await;
@@ -359,7 +482,8 @@ async fn main() -> anyhow::Result<()> {
     // Wait for shutdown signal (Ctrl+C)
     tokio::signal::ctrl_c().await?;
     info!(
-        total_connections = CONNECTIONS_ACCEPTED.load(Ordering::Relaxed),
+        tcp_connections = TCP_CONNECTIONS_ACCEPTED.load(Ordering::Relaxed),
+        grpc_requests = GRPC_REQUESTS_HANDLED.load(Ordering::Relaxed),
         "Shutting down gracefully..."
     );
 
@@ -367,7 +491,13 @@ async fn main() -> anyhow::Result<()> {
     let _ = shutdown_tx.send(true);
 
     // Wait for tasks to complete
-    let _ = tokio::join!(actor_handle, reconciler_handle, listener_handle);
+    let _ = tokio::join!(
+        actor_handle,
+        reconciler_handle,
+        listener_handle,
+        grpc_handle,
+        bridge_handle
+    );
     info!("Leviathan Control Plane shut down completely.");
 
     Ok(())

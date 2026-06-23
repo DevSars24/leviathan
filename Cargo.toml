@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "leviathan-cli",
     "leviathan-core",
+    "leviathan-net",
     "leviathan-node",
     "leviathan-control",
     "leviathan-scheduler",
@@ -47,3 +48,12 @@ uuid = { version = "1", features = ["v4", "serde"] }
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }
+
+# gRPC + Protobuf
+tonic = "0.12"
+prost = "0.13"
+tonic-build = "0.12"
+prost-build = "0.13"
+
+# Byte buffers
+bytes = "1"
