@@ -80,3 +80,55 @@ pub trait Healthcheck {
     /// Perform an internal health check and report the result.
     async fn health_check(&self) -> Result<HealthStatus, LeviathanError>;
 }
+
+// ---------------------------------------------------------------------------
+// Storage trait (Phase 4)
+// ---------------------------------------------------------------------------
+
+/// A durable, append-only log store.
+///
+/// This trait is generic over the entry type `E` to avoid a circular
+/// dependency between `leviathan-core` and `leviathan-storage`. Concrete
+/// entry types (e.g., `WalEntry`) implement `Serialize + DeserializeOwned`
+/// and live in the storage crate.
+///
+/// # Implementors
+///
+/// - `leviathan_storage::Wal` — file-backed, length-prefixed binary log with
+///   crash recovery and Raft-compatible truncation.
+///
+/// # Contract
+///
+/// Implementations must guarantee that:
+///
+/// - Entries survive a crash after [`Storage::flush`] returns `Ok(())`.
+/// - [`Storage::read_all`] never returns a partial (torn) entry.
+/// - [`Storage::truncate_from`] removes all entries with `index >= index`.
+#[async_trait::async_trait]
+pub trait Storage<E>: Send
+where
+    E: Send + 'static,
+{
+    /// Append `entry` to the log.
+    ///
+    /// The entry may be buffered; call [`Storage::flush`] for durability.
+    async fn append(&mut self, entry: E) -> Result<(), LeviathanError>;
+
+    /// Read and return all complete entries from the beginning of the log.
+    ///
+    /// Partial or corrupt entries at the tail (e.g., from a prior crash) are
+    /// silently discarded.
+    async fn read_all(&self) -> Result<Vec<E>, LeviathanError>;
+
+    /// Remove all entries with `entry.index >= index`.
+    ///
+    /// Used by Raft followers to repair their local log when a leader sends a
+    /// conflicting entry.
+    async fn truncate_from(&mut self, index: u64) -> Result<(), LeviathanError>;
+
+    /// Flush and `fsync` all buffered writes to the backing storage device.
+    ///
+    /// After this call returns `Ok(())` the entries written since the last
+    /// flush are durable against process crashes and OS reboots.
+    async fn flush(&mut self) -> Result<(), LeviathanError>;
+}

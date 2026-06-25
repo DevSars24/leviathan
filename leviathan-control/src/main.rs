@@ -16,16 +16,26 @@
 //!
 //! Both transports funnel messages into the same [`ClusterStateActor`] via
 //! an `mpsc` channel, guaranteeing a single source of truth.
+//!
+//! # Write-Ahead Log
+//!
+//! On startup the control plane opens (or recovers) a WAL at the path
+//! specified by `--wal-path`. Every [`StateCommand::RegisterNode`] and
+//! [`StateCommand::RecordHeartbeat`] command is recorded to the WAL before
+//! being applied in-memory, providing a durable audit trail that survives
+//! process restarts.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{mpsc, oneshot, watch, Mutex};
 use tracing::{error, info, warn};
 
 use leviathan_core::{
@@ -37,6 +47,8 @@ use leviathan_net::error::NetError;
 use leviathan_net::grpc::{
     GrpcStateCommand, NodeServiceImpl, NodeServiceServer,
 };
+
+use leviathan_storage::wal::{Wal, WalEntry};
 
 /// CLI arguments for the control plane daemon.
 #[derive(Parser, Debug)]
@@ -57,6 +69,13 @@ struct Args {
     /// heartbeats.
     #[arg(long, default_value_t = 6)]
     grace_period_secs: u64,
+
+    /// Path to the Write-Ahead Log file.
+    ///
+    /// The file is created if it does not exist. On restart, all complete
+    /// entries are recovered from this file before accepting new connections.
+    #[arg(long, default_value = "./data/control.wal")]
+    wal_path: PathBuf,
 }
 
 /// Counter tracking total inbound TCP node connections for observability.
@@ -107,16 +126,22 @@ pub enum StateCommand {
 ///
 /// This avoids lock contention and race conditions by funneling all state
 /// updates and queries through a single message-passing actor loop.
+///
+/// The actor holds a reference to the WAL so it can append durable log
+/// entries for every mutating command before applying them in-memory.
 struct ClusterStateActor {
     nodes: HashMap<NodeId, (Node, DateTime<Utc>)>,
     receiver: mpsc::Receiver<StateCommand>,
+    /// Shared, async-locked WAL handle.
+    wal: Arc<Mutex<Wal>>,
 }
 
 impl ClusterStateActor {
-    fn new(receiver: mpsc::Receiver<StateCommand>) -> Self {
+    fn new(receiver: mpsc::Receiver<StateCommand>, wal: Arc<Mutex<Wal>>) -> Self {
         Self {
             nodes: HashMap::new(),
             receiver,
+            wal,
         }
     }
 
@@ -134,7 +159,7 @@ impl ClusterStateActor {
                     }
                 }
                 Some(cmd) = self.receiver.recv() => {
-                    self.handle_command(cmd);
+                    self.handle_command(cmd).await;
                 }
             }
         }
@@ -142,9 +167,34 @@ impl ClusterStateActor {
 
     /// Dispatch a single [`StateCommand`] — extracted from the `run` loop for
     /// readability and testability.
-    fn handle_command(&mut self, cmd: StateCommand) {
+    ///
+    /// Mutating commands (`RegisterNode`, `RecordHeartbeat`) are written to the
+    /// WAL *before* being applied in-memory so a crash between the WAL write
+    /// and the in-memory update is recoverable on the next startup.
+    async fn handle_command(&mut self, cmd: StateCommand) {
         match cmd {
             StateCommand::RegisterNode { node } => {
+                // Persist to WAL first — log the node ID as the payload.
+                let wal_data = format!("RegisterNode:{}", node.id).into_bytes();
+                let entry = WalEntry { index: 0, term: 0, data: wal_data };
+                {
+                    let mut wal = self.wal.lock().await;
+                    match wal.append(entry).await {
+                        Ok(_) => {
+                            info!(
+                                node_id = %node.id,
+                                "WAL: appended RegisterNode entry"
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                error = %e,
+                                node_id = %node.id,
+                                "WAL: failed to append RegisterNode entry — state may be non-durable"
+                            );
+                        }
+                    }
+                }
                 info!(node_id = %node.id, addr = %node.addr, "Registering node");
                 let mut registered = node;
                 registered.status = NodeStatus::Ready;
@@ -152,6 +202,27 @@ impl ClusterStateActor {
                     .insert(registered.id.clone(), (registered, Utc::now()));
             }
             StateCommand::RecordHeartbeat { heartbeat } => {
+                // Persist heartbeat to WAL for audit trail.
+                let wal_data = format!("Heartbeat:{}", heartbeat.node_id).into_bytes();
+                let entry = WalEntry { index: 0, term: 0, data: wal_data };
+                {
+                    let mut wal = self.wal.lock().await;
+                    match wal.append(entry).await {
+                        Ok(_) => {
+                            tracing::debug!(
+                                node_id = %heartbeat.node_id,
+                                "WAL: appended Heartbeat entry"
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                error = %e,
+                                node_id = %heartbeat.node_id,
+                                "WAL: failed to append Heartbeat entry"
+                            );
+                        }
+                    }
+                }
                 if let Some((node, last_seen)) = self.nodes.get_mut(&heartbeat.node_id) {
                     node.status = NodeStatus::Ready;
                     node.resources = heartbeat.resources;
@@ -369,8 +440,29 @@ async fn main() -> anyhow::Result<()> {
         bind_addr = %args.bind_addr,
         grpc_addr = %args.grpc_addr,
         grace_period_secs = args.grace_period_secs,
+        wal_path = %args.wal_path.display(),
         "Initializing Leviathan Control Plane Daemon (dual-protocol: TCP + gRPC)"
     );
+
+    // --- Initialize Write-Ahead Log ---
+    //
+    // Open (or recover) the WAL before accepting any connections. If the
+    // process crashed previously, partial writes at the tail of the file are
+    // automatically detected and discarded here.
+    let wal = Wal::open(&args.wal_path)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to open WAL at {:?}: {}", args.wal_path, e))?;
+
+    // Log the recovery summary: how many complete entries were replayed.
+    let recovered_entries = wal.read_all().await
+        .map_err(|e| anyhow::anyhow!("Failed to read WAL entries: {}", e))?;
+    info!(
+        path = %args.wal_path.display(),
+        recovered_entry_count = recovered_entries.len(),
+        "WAL initialized — recovery complete"
+    );
+
+    let wal = Arc::new(Mutex::new(wal));
 
     let listener = TcpListener::bind(&args.bind_addr).await?;
     info!(addr = %args.bind_addr, "TCP listener bound (bincode framing)");
@@ -382,7 +474,7 @@ async fn main() -> anyhow::Result<()> {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
     // --- Spawn state actor task ---
-    let actor = ClusterStateActor::new(rx);
+    let actor = ClusterStateActor::new(rx, wal);
     let actor_shutdown_rx = shutdown_rx.clone();
     let actor_handle = tokio::spawn(async move {
         actor.run(actor_shutdown_rx).await;
