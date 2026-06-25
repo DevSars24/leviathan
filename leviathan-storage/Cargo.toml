@@ -1,0 +1,21 @@
+[package]
+name = "leviathan-storage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Write-ahead log and memory-mapped storage engine for Leviathan"
+
+[dependencies]
+leviathan-core = { path = "../leviathan-core" }
+tokio        = { workspace = true }
+serde        = { workspace = true }
+bincode      = { workspace = true }
+thiserror    = { workspace = true }
+async-trait  = { workspace = true }
+tracing      = { workspace = true }
+memmap2      = { workspace = true }
+
+[dev-dependencies]
+tokio    = { workspace = true }
+tempfile = { workspace = true }

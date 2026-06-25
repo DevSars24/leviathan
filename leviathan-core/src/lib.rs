@@ -21,7 +21,7 @@ pub use cooperative::{CooperativeYield, ExponentialBackoff};
 pub use error::LeviathanError;
 pub use node::{Heartbeat, Node, NodeId, NodeMessage, NodeStatus};
 pub use resources::ResourceSpec;
-pub use traits::{HealthStatus, Healthcheck, Reconcile, StateStore};
+pub use traits::{HealthStatus, Healthcheck, Reconcile, StateStore, Storage};
 
 /// Crate-level `Result` alias backed by [`LeviathanError`].
 pub type Result<T> = std::result::Result<T, LeviathanError>;

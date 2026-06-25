@@ -11,8 +11,9 @@ name = "leviathan-control"
 path = "src/main.rs"
 
 [dependencies]
-leviathan-core = { path = "../leviathan-core" }
-leviathan-net = { path = "../leviathan-net" }
+leviathan-core    = { path = "../leviathan-core" }
+leviathan-net     = { path = "../leviathan-net" }
+leviathan-storage = { path = "../leviathan-storage" }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

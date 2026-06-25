@@ -7,6 +7,7 @@ members = [
     "leviathan-node",
     "leviathan-control",
     "leviathan-scheduler",
+    "leviathan-storage",
 ]
 
 [workspace.package]
@@ -57,3 +58,9 @@ prost-build = "0.13"
 
 # Byte buffers
 bytes = "1"
+
+# Memory-mapped files
+memmap2 = "0.9"
+
+# Testing utilities
+tempfile = "3"
