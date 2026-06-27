@@ -69,6 +69,7 @@ impl MmapStore {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(path)?;
 
         // Ensure the file is at least `size` bytes so the mapping is valid.

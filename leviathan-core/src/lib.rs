@@ -16,7 +16,7 @@ pub mod resources;
 pub mod traits;
 
 // Re-export everything at the crate root for convenience.
-pub use container::{Container, ContainerId, ContainerStatus};
+pub use container::{Container, ContainerId, ContainerStatus, WorkloadSpec};
 pub use cooperative::{CooperativeYield, ExponentialBackoff};
 pub use error::LeviathanError;
 pub use node::{Heartbeat, Node, NodeId, NodeMessage, NodeStatus};

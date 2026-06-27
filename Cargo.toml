@@ -8,6 +8,10 @@ members = [
     "leviathan-control",
     "leviathan-scheduler",
     "leviathan-storage",
+    "leviathan-raft",
+    "leviathan-runtime",
+    "leviathan-mesh",
+    "leviathan-metrics",
 ]
 
 [workspace.package]
@@ -64,3 +68,21 @@ memmap2 = "0.9"
 
 # Testing utilities
 tempfile = "3"
+
+# --- Phase 5: Raft consensus ---
+rand = "0.8"
+
+# --- Phase 6: Container runtime (Linux-only syscalls gated at crate level) ---
+nix = { version = "0.29", features = ["sched", "mount", "signal", "net", "fs"] }
+libc = "0.2"
+
+# --- Phase 7: Service mesh + metrics ---
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+tokio-rustls = "0.26"
+rcgen = "0.13"
+webpki-roots = "0.26"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+prometheus-client = "0.22"
+http = "1"

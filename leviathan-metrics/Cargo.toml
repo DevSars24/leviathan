@@ -1,0 +1,21 @@
+[package]
+name = "leviathan-metrics"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Prometheus metrics and observability for the Leviathan platform"
+
+[dependencies]
+leviathan-core = { path = "../leviathan-core" }
+tokio             = { workspace = true }
+prometheus-client = { workspace = true }
+hyper             = { workspace = true }
+hyper-util        = { workspace = true }
+http-body-util    = { workspace = true }
+http              = { workspace = true }
+thiserror         = { workspace = true }
+tracing           = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
