@@ -36,6 +36,8 @@ use leviathan_core::{
 // ---------------------------------------------------------------------------
 
 /// Generated protobuf types and gRPC service traits from `leviathan.proto`.
+// Allow missing_docs for generated protobuf module because tonic-build doesn't generate docstrings for all fields.
+#[allow(missing_docs)]
 pub mod proto {
     tonic::include_proto!("leviathan");
 }

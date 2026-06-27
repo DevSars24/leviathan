@@ -26,3 +26,13 @@ async-trait = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
 
+[dev-dependencies]
+leviathan-raft      = { path = "../leviathan-raft" }
+leviathan-runtime   = { path = "../leviathan-runtime" }
+leviathan-mesh      = { path = "../leviathan-mesh" }
+leviathan-metrics   = { path = "../leviathan-metrics" }
+leviathan-scheduler = { path = "../leviathan-scheduler" }
+tokio               = { workspace = true, features = ["full"] }
+tempfile            = { workspace = true }
+
+

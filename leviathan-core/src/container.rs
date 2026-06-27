@@ -57,6 +57,41 @@ impl fmt::Display for ContainerStatus {
     }
 }
 
+/// Specification of a workload submitted to the Leviathan cluster.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkloadSpec {
+    /// Unique identifier for the workload.
+    pub id: String,
+    /// Human-readable name.
+    pub name: String,
+    /// OCI image reference.
+    pub image: String,
+    /// Resource requirements for containers spawned by this workload.
+    pub resources: ResourceSpec,
+    /// Number of desired replicas.
+    pub replicas: u32,
+}
+
+impl WorkloadSpec {
+    /// Create a new workload specification.
+    #[must_use]
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        image: impl Into<String>,
+        resources: ResourceSpec,
+        replicas: u32,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            image: image.into(),
+            resources,
+            replicas,
+        }
+    }
+}
+
 /// A container instance managed by Leviathan.
 ///
 /// Tracks identity, the OCI image it runs, its current status, resource
