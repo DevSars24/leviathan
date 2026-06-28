@@ -342,22 +342,3 @@ container isolation through raw syscalls, and resource scheduling under
 constraint. There is no framework to hide behind. Every abstraction gets built
 twice — once wrong, then right.
 
----
-```
-## Progress Log
-
-| Date | Day | Completed |
-|------|-----|-----------|
-| Day 1 | Project bootstrap | Cargo workspace · 5-crate layout · CLI with clap · Core types with serde/thiserror · .gitignore |
-| Day 2 | Async runtime | Tokio runtime · mpsc channels · Node heartbeat loop · select! · spawn |
-| Day 3 | TCP networking | TcpListener · bincode serialization · tonic gRPC · protobuf · TCP framing |
-| Day 4 | Storage engine | Write-ahead log · memmap2 · File I/O · Lifetimes · unsafe Rust · Drop trait |
-| Day 5 | Raft consensus | Leader election · AppendEntries RPC · Log replication · Arc<Mutex<T>> · Split-brain handling |
-| Day 6 | Container runtime | Linux namespaces · clone() syscall · unshare() · pivot_root() · cgroups v2 · libc FFI |
-| Day 7 | Scheduler + Observability | Bin-packing scheduler · Service discovery · Prometheus metrics · Full integration |
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE).
