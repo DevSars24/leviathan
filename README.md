@@ -9,6 +9,11 @@
 
 > **☠ A Distributed Container Orchestration System Written From Scratch In Rust.**
 
+![Build](https://img.shields.io/badge/build-passing-brightgreen)
+![Days](https://img.shields.io/badge/roadmap-7%2F7%20complete-brightgreen)
+![Language](https://img.shields.io/badge/language-Rust-orange)
+![License](https://img.shields.io/badge/license-MIT-blue)
+
 ---
 
 ## What is this?
@@ -202,13 +207,13 @@ flowchart TB
 
 | Day | Focus | Rust Concepts | Status |
 |-----|-------|---------------|--------|
-| **1** | Project init · Cargo workspace · CLI skeleton · Core types | Structs · Enums · Traits · Error handling · Modules | ✅ In Progress |
-| **2** | Async runtime · Tokio tasks · Channels · Node heartbeat loop | `Future` · `async/await` · `mpsc` · `select!` · `spawn` | ⏳ Pending |
-| **3** | TCP networking · Node communication protocol · Serialization | Sockets · `TcpListener` · `bincode` · `protobuf` · Framing | ⏳ Pending |
-| **4** | Storage engine · Write-ahead log · `mmap` | File I/O · `mmap` · Lifetimes · Ownership · `unsafe` | ⏳ Pending |
-| **5** | Raft consensus · Leader election · Log replication | State machines · `Arc<Mutex<>>` · `unsafe` · Term logic | ⏳ Pending |
-| **6** | Container runtime · Linux namespaces · cgroups | `unsafe Rust` · FFI · `clone()` · `unshare()` · `pivot_root` | ⏳ Pending |
-| **7** | Scheduler · Service mesh · Prometheus metrics · Integration | Full system integration · Placement algorithms · Observability | ⏳ Pending |
+| **1** | Project init · Cargo workspace · CLI skeleton · Core types | Structs · Enums · Traits · Error handling · Modules | ✅ Completed |
+| **2** | Async runtime · Tokio tasks · Channels · Node heartbeat loop | `Future` · `async/await` · `mpsc` · `select!` · `spawn` | ✅ Completed |
+| **3** | TCP networking · Node communication protocol · Serialization | Sockets · `TcpListener` · `bincode` · `protobuf` · Framing | ✅ Completed |
+| **4** | Storage engine · Write-ahead log · `mmap` | File I/O · `mmap` · Lifetimes · Ownership · `unsafe` | ✅ Completed |
+| **5** | Raft consensus · Leader election · Log replication | State machines · `Arc<Mutex<>>` · `unsafe` · Term logic | ✅ Completed |
+| **6** | Container runtime · Linux namespaces · cgroups | `unsafe Rust` · FFI · `clone()` · `unshare()` · `pivot_root` | ✅ Completed |
+| **7** | Scheduler · Service mesh · Prometheus metrics · Integration | Full system integration · Placement algorithms · Observability | ✅ Completed |
 
 ---
 
@@ -338,12 +343,18 @@ constraint. There is no framework to hide behind. Every abstraction gets built
 twice — once wrong, then right.
 
 ---
-
+```
 ## Progress Log
 
 | Date | Day | Completed |
 |------|-----|-----------|
 | Day 1 | Project bootstrap | Cargo workspace · 5-crate layout · CLI with clap · Core types with serde/thiserror · .gitignore |
+| Day 2 | Async runtime | Tokio runtime · mpsc channels · Node heartbeat loop · select! · spawn |
+| Day 3 | TCP networking | TcpListener · bincode serialization · tonic gRPC · protobuf · TCP framing |
+| Day 4 | Storage engine | Write-ahead log · memmap2 · File I/O · Lifetimes · unsafe Rust · Drop trait |
+| Day 5 | Raft consensus | Leader election · AppendEntries RPC · Log replication · Arc<Mutex<T>> · Split-brain handling |
+| Day 6 | Container runtime | Linux namespaces · clone() syscall · unshare() · pivot_root() · cgroups v2 · libc FFI |
+| Day 7 | Scheduler + Observability | Bin-packing scheduler · Service discovery · Prometheus metrics · Full integration |
 
 ---
 
